@@ -1,0 +1,84 @@
+/*
+Zadatak 3.11: Napisati C/SQL program kojim se sa standardnog ulaza unosi ime studijskog programa, a zatim se ispisuje 10 studenata tog smera 
+koji imaju najviše neuspešnih polaganja na ispitima tokom studija. 
+
+Izdvojiti ime, prezime, broj indeksa i broj neuspešnih polaganja tokom studija.
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv_sp[51];
+char ime[51], prezime[51];
+sqlint32 indeks, neuspesno;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    printf("Unesite naziv studijskog programa: ");
+    fgets(naziv_sp, sizeof(naziv_sp), stdin);
+    naziv_sp[strcspn(naziv_sp, "\n")] = '\0';
+
+    EXEC SQL 
+        DECLARE kursor CURSOR FOR 
+            SELECT  IME, PREZIME, D.INDEKS, COUNT(*) NEUSPESNA_POLAGANJA
+            FROM    DA.DOSIJE D JOIN DA.ISPIT I ON D.INDEKS=I.INDEKS 
+                                JOIN DA.STUDIJSKIPROGRAM SP ON SP.ID=D.IDPROGRAMA
+            WHERE STATUS='o' AND OCENA=5 AND SP.NAZIV=:naziv_sp
+            GROUP BY IME, PREZIME, D.INDEKS
+            ORDER BY NEUSPESNA_POLAGANJA DESC
+            FETCH FIRST 10 ROWS ONLY;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN kursor;
+    checkSQL("OPEN");
+
+    int i=1;
+    printf("     |         IME          |        PREZIME        |   INDEKS   | BROJ NEUSPESNIH POLAGANJA\n");
+    for(;;){
+        EXEC SQL 
+            FETCH kursor
+            INTO :ime, :prezime, :indeks, :neuspesno;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%3d. | %-20s |  %-20s |  %d  |             %d\n", i, ime, prezime, indeks, neuspesno);
+        i++;
+        
+    }
+
+    EXEC SQL CLOSE kursor;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

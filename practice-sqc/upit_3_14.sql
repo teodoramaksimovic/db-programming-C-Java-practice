@@ -1,0 +1,14 @@
+SELECT * 
+FROM DA.ISPIT I
+WHERE I.STATUS = 'o' AND I.OCENA>5 
+    AND (
+        SELECT COUNT(*)
+        FROM DA.UPISGODINE UG 
+        WHERE UG.INDEKS=I.INDEKS
+    ) <= 5 
+    AND (
+        SELECT COUNT(*)
+        FROM DA.ISPIT I2
+        WHERE I2.INDEKS=I.INDEKS AND I2.IDPREDMETA=I.IDPREDMETA 
+            AND I2.STATUS='o'
+    ) >= 3;

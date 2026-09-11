@@ -1,0 +1,57 @@
+/*
+Zadatak 2.7: Napisati C/SQL program koji za svaku ocenu od 6 do 10 ispisuje ime i prezime studenta koji je poslednji položio neki ispit sa tom ocenom. 
+U slučaju da ima više takvih studenata, klauzom LIMIT 1 naredbe SELECT INTO se osigurati da rezultat vrati najviše 1 rezultat. 
+
+(Pomoć: Koristiti for petlju za menjanje vrednosti matične promenljive koja sadrži ocenu, pa u svakoj iteraciji dohvatiti informaciju 
+za tekuću vrednost te matične promenljive.)
+
+*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+short ocena;
+char ime[51], prezime[51];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str) {
+    if(SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL CONNECT RESET;
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+
+    for(ocena=6; ocena<=10; ocena++){
+        EXEC SQL 
+            SELECT IME, PREZIME
+            INTO :ime, :prezime
+            FROM DA.DOSIJE D JOIN DA.ISPIT I ON I.INDEKS=D.INDEKS
+            WHERE OCENA=:ocena AND STATUS='o'
+            ORDER BY I.DATPOLAGANJA DESC 
+            LIMIT 1;
+        checkSQL("SELECT");
+        printf("Ocena %hd: %s %s\n", ocena, ime, prezime);
+    }
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("Prekidanje konekcije sa bazom podataka");
+
+    return 0;
+}

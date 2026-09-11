@@ -1,0 +1,71 @@
+/*
+Zadatak 3.7: Napisati C/SQL program koji ispisuje sva ženska imena koja postoje među studentima (zajedno sa brojem pojavljivanja) u opadajućem poretku.
+*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char ime[51];
+sqlint32 brojac;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    // zensko ime, broj pojavljivana, opadajuce
+    EXEC SQL 
+        DECLARE zenska_imena CURSOR FOR
+            SELECT IME, COUNT(*) BROJ
+            FROM DA.DOSIJE 
+            WHERE POL='z'
+            GROUP BY IME
+            ORDER BY BROJ DESC;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN zenska_imena;
+    checkSQL("OPEN");
+
+    for(;;){
+        EXEC SQL 
+            FETCH zenska_imena
+            INTO :ime, :brojac;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%-20s %10d\n", ime, brojac);
+    }
+    
+    EXEC SQL CLOSE zenska_imena;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

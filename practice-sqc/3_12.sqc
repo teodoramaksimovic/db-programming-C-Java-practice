@@ -1,0 +1,84 @@
+/*
+Zadatak 3.12: Napisati C/SQL program koji za studenta čiji se broj indeksa zadaje sa standardnog ulaza, 
+ispisuje naziv predmeta, datum polaganja, ocenu i broj osvojenih poena za svaki ispit koji je student položio. 
+
+Nakon toga ispisuje se prosečna ocena studenta.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 indeks;
+char naziv[151], datum[11], poeni[4];
+short datumInd, poeniInd;
+short ocena;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    printf("Unesi broj indeks: ");
+    scanf("%d", &indeks);
+
+    EXEC SQL 
+        DECLARE polozeni CURSOR FOR 
+            SELECT  NAZIV, DATPOLAGANJA, OCENA, POENI
+            FROM DA.ISPIT I JOIN DA.PREDMET P ON P.ID=I.IDPREDMETA
+            WHERE OCENA>5 AND STATUS='o' AND INDEKS=:indeks;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN polozeni;
+    checkSQL("OPEN");
+
+    int suma=0, brojac=0;
+    for(;;){
+        EXEC SQL 
+            FETCH polozeni
+            INTO :naziv, :datum :datumInd, :ocena, :poeni :poeniInd;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        suma+=ocena;
+        brojac++;
+
+        printf("\t%-70s %s %3hd %s\n", naziv, ((datumInd<0) ? "/" : datum), ocena, ((poeniInd<0) ? "/": poeni));
+    }
+
+    if(brojac==0) printf("Student nema polozenih ispita!\n");
+    else printf("Prosek: %.2lf\n", 1.0*suma/brojac);
+
+    EXEC SQL CLOSE polozeni;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

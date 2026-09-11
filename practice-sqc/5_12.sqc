@@ -1,0 +1,268 @@
+/*
+Zadatak 5.12**: Napisati C/SQL program koji omogućava studentu prijavu na praksu i redom:
+
+1. Ispisuje spisak identifikatora i naziva predmeta za koje može da  se prijavi student sa brojem 
+    indeksa koji se unosi sa standardnog  ulaza. 
+    Studentu se nude samo predmeti koje je položio sa ocenom većom od  prosečne ocene sa položenih 
+    ispita iz tog predmeta i oni koji se ne  nalaze u tabeli `PRAKSA2020` za odabranog studenta. 
+
+2. Omogućava odabir jednog predmeta unosom odgovarajućeg  identifikatora sa spiska ili unos 0 za kraj. 
+    Odabrani predmet se unosu u  tabelu `PRAKSA2020`  ukoliko ispunjava uslove. Posle svakog odabranog predmeta, 
+    program nudi  studentu izmenjeni spisak predmeta na kom se ne nalaze već odabrani  predmeti i postupak se ponavlja. 
+
+3. Ispisuje izveštaj koji za svaki prijavljeni predmet sadrži naziv  predmeta, broj do tada prijavljenih studenata 
+    za praksu iz tog  predmeta, prosečnu prolaznost iz tog predmeta. Izveštaj urediti  opadajuće po prolaznosti. 
+    Prolaznost se računa kao količnik broja  položenih ispita sa ocenom većom od 5 nevezano za status prijave i broj  
+    izlazaka na ispit (broj unosa u tabeli `ISPIT` sa statusom prijave različitim od `n`). 
+
+Obrada jedne prijave na praksu treba da predstavlja jednu transakciju.   
+
+*/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+
+sqlint32 indeks;
+sqlint32 idpredmeta;
+sqlint32 izabrani_id;
+
+char naziv_predmeta[151];
+
+sqlint32 broj;
+sqlint32 broj_prijavljenih;
+double prolaznost;
+
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    printf("Unesite broj indeksa: ");
+    scanf("%d", &indeks);
+
+
+    /*
+     * Kursor izdvaja predmete:
+     * - koje je student polozio
+     * - sa ocenom vecom od prosecne ocene polozenih ispita
+     *   iz tog predmeta
+     * - za koje student vec nije prijavljen na praksu
+     */
+    EXEC SQL
+        DECLARE predmeti CURSOR FOR
+            SELECT P.ID, P.NAZIV
+            FROM DA.PREDMET P
+            WHERE EXISTS (
+                    SELECT *
+                    FROM DA.ISPIT I
+                    WHERE I.IDPREDMETA = P.ID
+                      AND I.INDEKS = :indeks
+                      AND I.STATUS = 'o'
+                      AND I.OCENA > 5
+                      AND I.OCENA > (
+                            SELECT AVG(I2.OCENA * 1.0)
+                            FROM DA.ISPIT I2
+                            WHERE I2.IDPREDMETA = P.ID
+                              AND I2.STATUS = 'o'
+                              AND I2.OCENA > 5
+                      )
+            )
+            AND NOT EXISTS (
+                    SELECT *
+                    FROM DA.PRAKSA2020 PR
+                    WHERE PR.INDEKS = :indeks
+                      AND PR.IDPREDMETA = P.ID
+            )
+            ORDER BY P.ID;
+    checkSQL("DECLARE predmeti");
+
+    for (;;) {
+        EXEC SQL OPEN predmeti;
+        checkSQL("OPEN predmeti");
+
+        printf("\nPredmeti za koje mozete da se prijavite:\n");
+
+        int found = 0;
+        for (;;) {
+            EXEC SQL
+                FETCH predmeti
+                INTO :idpredmeta, :naziv_predmeta;
+
+            checkSQL("FETCH predmeti");
+
+            if (SQLCODE == 100)
+                break;
+
+            found = 1;
+
+            printf("\t%d %s\n", idpredmeta, naziv_predmeta);
+        }
+
+        EXEC SQL CLOSE predmeti;
+        checkSQL("CLOSE predmeti");
+
+
+        if (!found) {
+            printf("Nema vise predmeta za koje mozete da se prijavite.\n");
+            break;
+        }
+
+        printf("\nUnesite identifikator predmeta (0 za kraj): ");
+        scanf("%d", &izabrani_id);
+
+        if (izabrani_id == 0)
+            break;
+
+        /*
+         * Provera da li izabrani predmet stvarno ispunjava uslove.
+         */
+        EXEC SQL
+            SELECT COUNT(*)
+            INTO :broj
+            FROM DA.PREDMET P
+            WHERE P.ID = :izabrani_id AND EXISTS (
+                    SELECT *
+                    FROM DA.ISPIT I
+                    WHERE I.IDPREDMETA = P.ID
+                      AND I.INDEKS = :indeks
+                      AND I.STATUS = 'o'
+                      AND I.OCENA > 5
+                      AND I.OCENA > (
+                            SELECT AVG(I2.OCENA * 1.0)
+                            FROM DA.ISPIT I2
+                            WHERE I2.IDPREDMETA = P.ID
+                              AND I2.STATUS = 'o'
+                              AND I2.OCENA > 5
+                      )
+              )
+              AND NOT EXISTS (
+                    SELECT *
+                    FROM DA.PRAKSA2020 PR
+                    WHERE PR.INDEKS = :indeks
+                      AND PR.IDPREDMETA = P.ID
+              );
+
+        checkSQL("Provera predmeta");
+
+
+        if (broj == 0) {
+            printf("Izabrani predmet ne ispunjava uslove za prijavu.\n");
+            continue;
+        }
+
+        EXEC SQL
+            INSERT INTO DA.PRAKSA2020 (INDEKS, IDPREDMETA)
+            VALUES (:indeks, :izabrani_id);
+        checkSQL("INSERT PRAKSA2020");
+
+        printf("Uspesno ste se prijavili na praksu iz predmeta %d.\n",
+               izabrani_id);
+
+        EXEC SQL COMMIT;
+        checkSQL("COMMIT");
+    }
+
+
+    /*
+     * 3. Izvestaj za predmete na koje je student prijavljen.
+     */
+    EXEC SQL
+        DECLARE izvestaj CURSOR FOR
+            SELECT
+                P.NAZIV,
+
+                (SELECT COUNT(*)
+                 FROM DA.PRAKSA2020 PR2
+                 WHERE PR2.IDPREDMETA = P.ID),
+
+                COALESCE(
+                    100.0 *
+                    (SELECT COUNT(*)
+                     FROM DA.ISPIT I
+                     WHERE I.IDPREDMETA = P.ID AND I.STATUS='o' AND I.OCENA > 5)
+                    /
+                    NULLIF(
+                        (SELECT COUNT(*)
+                         FROM DA.ISPIT I
+                         WHERE I.IDPREDMETA = P.ID
+                           AND I.STATUS <> 'n'),
+                        0
+                    ),
+                    0
+                ) AS PROLAZNOST
+
+            FROM DA.PRAKSA2020 PR
+            JOIN DA.PREDMET P
+                ON P.ID = PR.IDPREDMETA
+
+            WHERE PR.INDEKS = :indeks
+
+            ORDER BY PROLAZNOST DESC;
+
+    checkSQL("DECLARE izvestaj");
+
+
+    EXEC SQL OPEN izvestaj;
+    checkSQL("OPEN izvestaj");
+
+
+    printf("\nIZVESTAJ\n");
+    printf("%-50s %15s %15s\n",
+           "Predmet", "Prijavljenih", "Prolaznost");
+
+
+    for (;;) {
+
+        EXEC SQL
+            FETCH izvestaj
+            INTO :naziv_predmeta,
+                 :broj_prijavljenih,
+                 :prolaznost;
+
+        checkSQL("FETCH izvestaj");
+
+        if (SQLCODE == 100)
+            break;
+
+        printf("%-50s %15d %14.2lf%%\n",
+               naziv_predmeta,
+               broj_prijavljenih,
+               prolaznost);
+    }
+
+
+    EXEC SQL CLOSE izvestaj;
+    checkSQL("CLOSE izvestaj");
+
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}
+

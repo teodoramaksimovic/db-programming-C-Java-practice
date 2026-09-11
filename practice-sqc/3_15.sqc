@@ -1,0 +1,116 @@
+/*
+Zadatak 3.15: Napisati C/SQL program kojim se, za svakog studenta koji se upisao u godini koja se učitava sa standardnog ulaza, 
+ispisuju podaci o imenu, prezimenu i prosečnoj oceni, a zatim se ispisuju informacije o položenim ispitima i to: 
+    naziv predmeta, ocena i datum polaganja.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 godina;
+char ime[51], prezime[51];
+double prosek;
+sqlint32 indeks;
+
+char nazivpredmeta[151];
+short ocena;
+char datum[11];
+short datumInd;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    printf("Unesite godinu upisa: ");
+    scanf("%d", &godina);
+
+    EXEC SQL 
+        DECLARE studenti CURSOR FOR 
+            SELECT  D.INDEKS, D.IME, D.PREZIME, COALESCE(AVG(I.OCENA * 1.0), 0) AS PROSEK
+            FROM    DA.DOSIJE D LEFT JOIN DA.ISPIT I ON I.INDEKS = D.INDEKS
+            WHERE D.INDEKS / 10000 = :godina
+            GROUP BY D.INDEKS, D.IME, D.PREZIME;
+    checkSQL("DECLARE studenti");
+
+    /*dobijaš samo studente koji imaju makar jedan položen ispit. 
+    Zadatak kaže za svakog studenta koji se upisao te godine, pa bi trebalo da uključiš i one bez položenih ispita.  LEFT JOIN!!!!!!!!!!!!!
+                DOSIJE [LEVO] NIJE NULA JOIN ISPIT MOZE DA BUDE NULL
+    Za njih prosek može biti NULL.*/
+
+    EXEC SQL 
+        DECLARE polozeno CURSOR FOR 
+            SELECT  NAZIV, OCENA, DATPOLAGANJA
+            FROM    DA.ISPIT I JOIN DA.PREDMET P ON I.IDPREDMETA=P.ID 
+            WHERE OCENA>5 AND STATUS='o' AND I.INDEKS=:indeks;
+    checkSQL("DECLARE polozeno");
+
+    EXEC SQL OPEN studenti;
+    checkSQL("OPEN studenti");
+
+    for(;;){
+        EXEC SQL 
+            FETCH studenti 
+            INTO :indeks, :ime, :prezime, :prosek;
+        checkSQL("FETCH studenti");
+
+        if(SQLCODE==100)
+            break;
+
+        if(prosek != 0){
+            printf("%s %s %.2lf\n", ime, prezime, prosek);
+        }else{
+            printf("%s %s\n\tStudent nema polozene ispite!\n", ime, prezime);
+        }
+
+        EXEC SQL OPEN polozeno;
+        checkSQL("OPEN polozeno");
+
+        for(;;){
+            EXEC SQL 
+                FETCH polozeno
+                INTO :nazivpredmeta, :ocena, :datum :datumInd;
+            checkSQL("FETCH studenti");
+
+            if(SQLCODE==100)
+                break;
+
+            if(prosek != 0)
+                printf("\t%-100s %5hd %s\n", nazivpredmeta, ocena, ((datumInd<0) ? "/" : datum));
+        }
+        EXEC SQL CLOSE polozeno;
+        checkSQL("CLOSE polozeno");
+    }
+
+    EXEC SQL CLOSE studenti;
+    checkSQL("CLOSE studenti");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

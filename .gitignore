@@ -1,0 +1,1 @@
+.env\n*.o\n*.class\ntarget/\n.idea/\n*.iml

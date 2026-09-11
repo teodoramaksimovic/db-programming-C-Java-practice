@@ -1,0 +1,90 @@
+/*
+Zadatak 2.9: Napisati C/SQL program kojim se dodaje novi studijski program prvog stepena čiji se podaci unose sa standardnog ulaza.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 id;
+char oznaka[11];
+char naziv[51];
+short espb;
+char zvanje[101];
+
+struct {
+    short length;
+    char data[32701];
+} opis;
+
+short opisInd;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+
+    printf("Unesite ID: ");
+    scanf("%d", &id);
+    getchar();
+
+    printf("Unesite oznaku: ");
+    fgets(oznaka, sizeof(oznaka), stdin);
+    oznaka[strcspn(oznaka, "\n")] = '\0';
+
+    printf("Unesite naziv: ");
+    fgets(naziv, sizeof(naziv), stdin);
+    naziv[strcspn(naziv, "\n")] = '\0';
+
+    printf("Unesite broj ESPB: ");
+    scanf("%hd", &espb);
+    getchar();
+
+    printf("Unesite zvanje: ");
+    fgets(zvanje, sizeof(zvanje), stdin);
+    zvanje[strcspn(zvanje, "\n")] = '\0';
+
+    printf("Unesi opis (Enter ako nema opisa): ");
+    fgets(opis.data, sizeof(opis.data), stdin);
+    opis.data[strcspn(opis.data, "\n")] = '\0';
+
+    if (strlen(opis.data) == 0) opisInd = -1;
+    else {
+        opisInd = 0;
+        opis.length = strlen(opis.data);
+    }
+
+    EXEC SQL
+        INSERT INTO DA.STUDIJSKIPROGRAM (ID, OZNAKA, NAZIV, IDNIVOA, OBIMESPB, ZVANJE, OPIS)
+        VALUES (:id, :oznaka, :naziv, 1, :espb, :zvanje, :opis :opisInd);
+
+    checkSQL("INSERT");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

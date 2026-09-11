@@ -1,0 +1,94 @@
+/*
+Zadatak 3.9: Napisati C/SQL program koji se za sve studente smera Informatika ažurira u tabeli ISPIT prvi položen ispit 
+(ukoliko ima položenih ispita za tog studenta) tako što povećava ocenu za 1 (ukoliko je ocena bila 5 ili 10 ostavlja je nepromenjenu).
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 indeks;
+short ocena;
+char datum[11];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    EXEC SQL
+        DECLARE studenti CURSOR FOR 
+            SELECT  I.INDEKS, I.OCENA, I.DATPOLAGANJA
+            FROM    DA.ISPIT I 
+            WHERE   I.STATUS='o' AND OCENA>5 AND 
+                    'Informatika' = (
+                        SELECT SP.NAZIV
+                        FROM DA.STUDIJSKIPROGRAM SP JOIN DA.DOSIJE D ON SP.ID=D.IDPROGRAMA
+                        WHERE D.INDEKS=I.INDEKS
+                    ) AND 
+                    I.DATPOLAGANJA = (
+                        SELECT MIN(I2.DATPOLAGANJA)
+                        FROM DA.ISPIT I2 
+                        WHERE I2.INDEKS=I.INDEKS AND I2.STATUS='o' AND I2.OCENA>5)
+            FOR UPDATE OF OCENA;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN studenti;
+    checkSQL("OPEN");
+
+    for(;;){
+        EXEC SQL 
+            FETCH studenti
+            INTO :indeks, :ocena, :datum;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        if(ocena != 10){
+            EXEC SQL 
+                UPDATE DA.ISPIT
+                SET OCENA=OCENA+1
+                WHERE CURRENT OF studenti;
+            checkSQL("UPDATE");
+        }
+
+        /*
+            ili bez if:   SET OCENA =
+                                CASE
+                                    WHEN OCENA = 10 THEN OCENA
+                                    ELSE OCENA + 1
+                                END
+        */
+    }
+
+    EXEC SQL CLOSE studenti;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

@@ -1,0 +1,92 @@
+/*
+Zadatak 4.5: Napisati C/SQL program u kojem se naredbe izvršavaju dinamički. 
+Izdvojiti naziv predmeta, prosečnu ocenu i procenat studenata iz tog predmeta u školskoj godini koja se unosi sa standardnog ulaza.
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sql.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naredba[1024];
+sqlint32 skgodina;
+
+char naziv[151];
+double prosek_ocena;
+double procenat_uspesnosti;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str) {
+    if(sqlca.sqlcode < 0) {
+        char buffer[1024];
+        short bufferSize = sizeof(buffer);
+        short lineWidth = 50;
+        sqlaintp(buffer, bufferSize, lineWidth, &sqlca);
+
+        fprintf(stderr, "Greska %d: %s\n", sqlca.sqlcode, str);
+        fprintf(stderr, "%s\n", buffer);
+        EXEC SQL CONNECT RESET;
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main(){
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Connect");
+
+    printf("Unesi skolsku godinu: ");
+    scanf("%d", &skgodina);
+
+    sprintf(naredba, "SELECT NAZIV, "
+                   "COALESCE( "
+                        "AVG(CASE WHEN STATUS='o' AND OCENA>5 THEN OCENA*1.0 END) "
+                    ",0) PROSEK_OCENA, "
+                   "100.0 * SUM(CASE WHEN I.OCENA > 5 AND I.STATUS='o' THEN 1 ELSE 0 END) / COUNT(*) "
+                   "FROM DA.PREDMET P JOIN DA.ISPIT I ON I.IDPREDMETA=P.ID  "
+                   "WHERE SKGODINA=? "
+                   "GROUP BY NAZIV"
+            );
+
+/***********************************************************************/
+    EXEC SQL 
+        PREPARE pripremljenaNaredba
+        FROM :naredba;
+    checkSQL("PREPARE");
+
+    EXEC SQL DECLARE predmeti CURSOR FOR pripremljenaNaredba;       
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN predmeti USING :skgodina;
+    checkSQL("OPEN");
+/***********************************************************************/
+
+    for(;;){
+        EXEC SQL
+            FETCH predmeti
+            INTO :naziv, :prosek_ocena, :procenat_uspesnosti;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%-70s %15.2lf %15.2lf\n", naziv, prosek_ocena, procenat_uspesnosti);
+    }
+
+    EXEC SQL CLOSE predmeti;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("Connect reset");
+
+    return 0;
+}

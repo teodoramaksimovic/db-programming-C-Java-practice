@@ -1,0 +1,72 @@
+/*
+Zadatak 3.8: Napisati C/SQL program koji ispisuje za svakog studenta ime, prezime, 
+poslednji položeni ispit (naziv predmeta koji je položen), kao i datum polaganja tog ispita.
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char ime[51], prezime[51], nazivpredmeta[151], datum[11];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    EXEC SQL
+        DECLARE studenti CURSOR FOR 
+            SELECT  D.IME, D.PREZIME, NAZIV, I.DATPOLAGANJA
+            FROM    DA.DOSIJE D JOIN DA.ISPIT I ON D.INDEKS=I.INDEKS
+                                JOIN DA.PREDMET P ON P.ID=I.IDPREDMETA
+            WHERE   I.STATUS='o' AND OCENA>5 AND I.DATPOLAGANJA = (
+                        SELECT MAX(I2.DATPOLAGANJA)
+                        FROM DA.ISPIT I2
+                        WHERE I2.INDEKS = I.INDEKS AND I2.STATUS = 'o' AND I2.OCENA > 5);
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN studenti;
+    checkSQL("OPEN");
+
+    for(;;){
+        EXEC SQL 
+            FETCH studenti
+            INTO :ime, :prezime, :nazivpredmeta, :datum;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%-20s %-20s %-100s %s\n", ime, prezime, nazivpredmeta, datum);
+    }
+
+    EXEC SQL CLOSE studenti;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

@@ -1,0 +1,120 @@
+/*
+Zadatak 3.17: Napisati C/SQL program koji ispisuje izveštaj za svaki predmet o njegovim uslovnim predmetima. 
+Za svaki predmet ispisati informacije o identifikatoru predmeta i njegovom nazivu. 
+Svaka sekcija koja izlistava informacije o uslovnim predmetima treba da ispisuje 
+    identifikator i naziv uslovnih predmeta za tekući predmet za koji se pravi sekcija, 
+    pri čemu se prikazuju informacije samo o onim uslovnim predmetima za koje postoji polaganje sa 
+    ocenom 10 na osnovnim akademskim studijama čiji je datum polaganja bio pre 2018. godine.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv_predmeta[151];
+char naziv_uslovnog[151];
+sqlint32 idpredmeta;
+sqlint32 iduslovnog;
+char oznaka_predmeta[21];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+
+    EXEC SQL 
+        DECLARE predmeti_kursor CURSOR WITH HOLD FOR 
+            SELECT ID, NAZIV
+            FROM DA.PREDMET P ;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN predmeti_kursor;
+    checkSQL("OPEN predmeti");
+
+    for(;;){
+        EXEC SQL 
+            FETCH predmeti_kursor
+            INTO :idpredmeta, :naziv_predmeta;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%d %s\n", idpredmeta, naziv_predmeta);
+
+        EXEC SQL 
+            DECLARE uslovni CURSOR FOR 
+                SELECT 
+                        UP.IDUSLOVNOGPREDMETA,
+                        P.NAZIV 
+                FROM    DA.USLOVNIPREDMET UP JOIN DA.PREDMET P ON P.ID=UP.IDUSLOVNOGPREDMETA
+                WHERE   UP.IDPREDMETA= :idpredmeta AND EXISTS (
+                            SELECT  *
+                            FROM    DA.ISPIT I JOIN DA.DOSIJE D ON D.INDEKS=I.INDEKS 
+                                    JOIN DA.STUDIJSKIPROGRAM SP ON SP.ID=D.IDPROGRAMA
+                            WHERE   OCENA=10 AND STATUS='o' AND YEAR(DATPOLAGANJA)<2018 AND SP.IDNIVOA=1
+                                    AND I.IDPREDMETA=UP.IDUSLOVNOGPREDMETA
+                            );
+        checkSQL("DECLARE uslovni");
+
+        EXEC SQL OPEN uslovni;  
+        checkSQL("OPEN uslovni");
+
+        int found = 0;
+        for(;;){
+            EXEC SQL 
+                FETCH uslovni 
+                INTO :iduslovnog, :naziv_uslovnog;
+            checkSQL("FETCH uslovni");
+
+            if(SQLCODE==100)
+                break;
+
+            found=1;
+
+            printf("\t%d %s\n", iduslovnog, naziv_uslovnog);            
+        }
+
+        if(!found)
+            printf("\tNije pronadjen uslovni predmet koji ispunjava uslove.\n");
+
+        EXEC SQL CLOSE uslovni;
+        checkSQL("CLOSE uslovni");
+
+        EXEC SQL COMMIT;
+        checkSQL("COMMIT 1");
+
+        
+    }
+
+    EXEC SQL CLOSE predmeti_kursor;
+    checkSQL("CLOSE predmeti");
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

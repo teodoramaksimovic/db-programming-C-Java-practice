@@ -1,0 +1,96 @@
+/*
+Zadatak 5.10: Napisati C/SQL program koji za svaki predmet koji je obavezan na smeru čiji je identifikator 103, 
+pita korisnika da li želi da poveća broj bodova za 1. Ukoliko je odgovor korisnika ‘da’, 
+izvršava se odgovarajuća naredba. 
+
+Obrada jednog predmeta treba da predstavlja jednu transakciju.
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 idpredmeta;
+char naziv_predmeta[151];
+short espb;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    EXEC SQL
+        DECLARE predmeti CURSOR WITH HOLD FOR
+            SELECT P.ID, P.NAZIV, P.ESPB
+            FROM DA.PREDMET P
+            JOIN DA.PREDMETPROGRAMA PP ON PP.IDPREDMETA = P.ID
+            WHERE PP.IDPROGRAMA = 103 AND PP.VRSTA = 'obavezan'
+            ORDER BY P.ID;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN predmeti;
+    checkSQL("OPEN");
+
+    for (;;) {
+        EXEC SQL
+            FETCH predmeti
+            INTO :idpredmeta, :naziv_predmeta, :espb;
+        checkSQL("FETCH");
+
+        if (SQLCODE == 100)
+            break;
+
+        printf("\nPredmet: %d %s\n", idpredmeta, naziv_predmeta);
+        printf("Broj ESPB: %hd\n", espb);
+
+        printf("Da li zelite da povecate broj bodova za 1? [d/n] ");
+
+        char odgovor;
+        scanf(" %c", &odgovor);
+
+        if (odgovor == 'd' || odgovor == 'D') {
+
+            EXEC SQL
+                UPDATE DA.PREDMET
+                SET ESPB = ESPB + 1
+                WHERE ID = :idpredmeta;
+            checkSQL("UPDATE");
+
+            printf("Broj bodova je uspesno povecan.\n");
+        }
+
+        EXEC SQL COMMIT;
+        checkSQL("COMMIT");
+    }
+
+    EXEC SQL CLOSE predmeti;
+    checkSQL("CLOSE");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

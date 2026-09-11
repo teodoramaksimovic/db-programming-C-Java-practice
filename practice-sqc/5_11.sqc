@@ -1,0 +1,131 @@
+/*
+Zadatak 5.11: Napisati C/SQL program koji za svaki predmet koji je obavezan na smeru čiji je identifikator 101 pronalazi i 
+ispisuje uslovne predmete, a zatim pita korisnika da li želi da poveća ukloni uslovnosti za tekući predmet. 
+
+Ukoliko je odgovor korisnika ‘da’, aplikacija izvršava brisanje i prikazuje korisniku poruku. 
+
+Obrada jednog predmeta treba da predstavlja jednu transakciju.
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+
+sqlint32 idpredmeta;
+char naziv_predmeta[151];
+sqlint32 iduslovnog;
+char naziv_uslovnog[151];
+
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    EXEC SQL
+        DECLARE predmeti CURSOR WITH HOLD FOR
+            SELECT P.ID, P.NAZIV
+            FROM DA.PREDMET P
+            JOIN DA.PREDMETPROGRAMA PP ON PP.IDPREDMETA = P.ID
+            WHERE PP.IDPROGRAMA = 101 AND PP.VRSTA = 'obavezan'
+            ORDER BY P.ID;
+    checkSQL("DECLARE predmeti");
+
+    EXEC SQL OPEN predmeti;
+    checkSQL("OPEN predmeti");
+
+    for (;;) {
+        EXEC SQL
+            FETCH predmeti
+            INTO :idpredmeta, :naziv_predmeta;
+        checkSQL("FETCH predmeti");
+
+        if (SQLCODE == 100)
+            break;
+
+        printf("\nPredmet: %d %s\n", idpredmeta, naziv_predmeta);
+
+        EXEC SQL
+            DECLARE uslovni CURSOR FOR
+                SELECT P.ID, P.NAZIV
+                FROM DA.USLOVNIPREDMET UP
+                JOIN DA.PREDMET P ON P.ID = UP.IDUSLOVNOGPREDMETA
+                WHERE UP.IDPREDMETA = :idpredmeta;
+        checkSQL("DECLARE uslovni");
+
+        EXEC SQL OPEN uslovni;
+        checkSQL("OPEN uslovni");
+
+        int found = 0;
+        for (;;) {
+            EXEC SQL
+                FETCH uslovni
+                INTO :iduslovnog, :naziv_uslovnog;
+
+            checkSQL("FETCH uslovni");
+
+            if (SQLCODE == 100)
+                break;
+
+            found = 1;
+
+            printf("\t%d %s\n", iduslovnog, naziv_uslovnog);
+        }
+
+        EXEC SQL CLOSE uslovni;
+        checkSQL("CLOSE uslovni");
+
+        if (!found) {
+            printf("\tPredmet nema uslovnih predmeta.\n");
+        }
+        else {
+            printf("\tDa li zelite da uklonite uslovnosti za ovaj predmet? [d/n] ");
+            char odgovor;
+            scanf(" %c", &odgovor);
+
+            if (odgovor == 'd' || odgovor == 'D') {
+                EXEC SQL
+                    DELETE FROM DA.USLOVNIPREDMET
+                    WHERE IDPREDMETA = :idpredmeta;
+                checkSQL("DELETE");
+                printf("\tUslovnosti su uspesno uklonjene.\n");
+            }
+        }
+
+        // Obrada jednog predmeta = jedna transakcija
+        EXEC SQL COMMIT;
+        checkSQL("COMMIT");
+    }
+
+    EXEC SQL CLOSE predmeti;
+    checkSQL("CLOSE predmeti");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

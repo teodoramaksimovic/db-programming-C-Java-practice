@@ -1,0 +1,132 @@
+/*
+Zadatak 3.16: Napisati C/SQL program koji nudi mogućnost ukidanja uslova polaganja za predmete. 
+Program prvo zahteva od korisnika da unese naziv predmeta. 
+Program pronalazi sve predmete sa datim nazivom (može ih biti više) i ispisuje njihove identifikatore, nazive i oznake.
+
+Za svaki takav predmet P, program ispisuje identifikatore i nazive njegovih uslovnih predmeta U. 
+
+Za svaki uslovni predmet U predmeta P, program pita korisnika da li želi da ukine uslovnost P->U. 
+Ukoliko korisnik potvrdi, ukinuti uslov i ispisati poruku.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv_predmeta[151], naziv_uslovnog[151];
+sqlint32 idpredmeta, iduslovnog;
+char oznaka_predmeta[21];
+
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    printf("Unesi ime predmeta: ");
+    fgets(naziv_predmeta, sizeof(naziv_predmeta), stdin);
+    naziv_predmeta[strcspn(naziv_predmeta, "\n")] = '\0';
+
+    EXEC SQL 
+        DECLARE predmeti_kursor CURSOR WITH HOLD FOR 
+            SELECT ID, NAZIV, OZNAKA
+            FROM DA.PREDMET P 
+            WHERE P.NAZIV = :naziv_predmeta;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN predmeti_kursor;
+    checkSQL("OPEN predmeti");
+
+    for(;;){
+        EXEC SQL 
+            FETCH predmeti_kursor
+            INTO :idpredmeta, :naziv_predmeta, :oznaka_predmeta;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        printf("%d %s %s\n", idpredmeta, naziv_predmeta, oznaka_predmeta);
+
+        EXEC SQL 
+            DECLARE uslovni CURSOR FOR 
+                SELECT 
+                        UP.IDUSLOVNOGPREDMETA,
+                        (SELECT P.NAZIV FROM DA.PREDMET P WHERE P.ID=UP.IDUSLOVNOGPREDMETA)
+                FROM    DA.USLOVNIPREDMET UP 
+                WHERE UP.IDPREDMETA= :idpredmeta;
+        checkSQL("DECLARE uslovni");
+
+        EXEC SQL OPEN uslovni;  
+        checkSQL("OPEN uslovni");
+
+        int ima_uslovne = 0;
+        for(;;){
+            EXEC SQL 
+                FETCH uslovni 
+                INTO :iduslovnog, :naziv_uslovnog;
+            checkSQL("FETCH uslovni");
+
+            if(SQLCODE==100)
+                break;
+
+            ima_uslovne=1;
+            
+            printf("\t%d %s\n", iduslovnog, naziv_uslovnog);
+            printf("\tDa li zelite da ukinete uslovnost? [d/n] ");
+            char odg;
+            scanf(" %c", &odg);
+            if(odg == 'd'){
+                EXEC SQL 
+                    DELETE 
+                    FROM DA.USLOVNIPREDMET
+                    WHERE IDPREDMETA = :idpredmeta AND IDUSLOVNOGPREDMETA = :iduslovnog;
+                checkSQL("DELETE");
+                printf("\tUspesno obrisano!\n");
+            }
+        }
+
+        if(!ima_uslovne)
+            printf("\tPredmet nema uslovne predmete!\n");
+
+        EXEC SQL CLOSE uslovni;
+        checkSQL("CLOSE uslovni");
+
+        EXEC SQL COMMIT;
+        checkSQL("COMMIT 1");
+    }
+
+    EXEC SQL CLOSE predmeti_kursor;
+    checkSQL("CLOSE predmeti");
+
+    EXEC SQL COMMIT;
+    checkSQL("COMMIT 2");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

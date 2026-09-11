@@ -1,0 +1,89 @@
+/*
+Zadatak 3.14: Napisati C/SQL program kojim se brišu sva uspešna polaganja 
+ispita iz barem trećeg pokušaja za studente koji su upisivali najviše 
+N godina, gde se vrednost za N unosi sa standardnog ulaza.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+sqlint32 N, indeks, idpredmeta;
+char datum[11];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    printf("Unesite N: ");
+    scanf("%d", &N);
+    
+    EXEC SQL 
+        DECLARE kursor CURSOR FOR 
+            SELECT  I.INDEKS, I.IDPREDMETA, I.DATPOLAGANJA
+            FROM    DA.ISPIT I
+            WHERE   I.STATUS = 'o' AND I.OCENA>5 
+                AND (
+                    SELECT  COUNT(*)
+                    FROM    DA.UPISGODINE UG 
+                    WHERE   UG.INDEKS=I.INDEKS
+                ) <= :N  
+            AND (
+                SELECT  COUNT(*)
+                FROM    DA.ISPIT I2
+                WHERE   I2.INDEKS=I.INDEKS 
+                    AND I2.IDPREDMETA=I.IDPREDMETA 
+                    AND I2.STATUS='o'
+                ) >= 3;
+        checkSQL("DECLARE");
+
+    EXEC SQL OPEN kursor;
+    checkSQL("OPEN");
+
+    for(;;){
+        EXEC SQL 
+            FETCH kursor
+            INTO :indeks, :idpredmeta, :datum;
+        checkSQL("FETCH");
+
+        if(SQLCODE == 100)
+            break;
+
+        EXEC SQL 
+            DELETE FROM DA.ISPIT
+            WHERE CURRENT OF kursor;
+        checkSQL("DELETE");
+    }
+
+    EXEC SQL CLOSE kursor;
+    checkSQL("CLOSE");
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

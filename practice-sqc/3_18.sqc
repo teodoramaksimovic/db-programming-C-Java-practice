@@ -1,0 +1,122 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv_ir[31], oznaka_roka[21], datum_polaganja[11];
+sqlint32 uspesno, indeks, idpredmeta;
+short godina_roka, ocena, ind_datum_polaganja;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str) {
+    if(SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL CONNECT RESET;
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main() {
+    char odg;
+    int brojac;
+
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    EXEC SQL DECLARE kursor_rokovi CURSOR FOR
+        SELECT IR.SKGODINA, IR.OZNAKAROKA, IR.NAZIV, OCENA, COUNT(*)
+        FROM DA.ISPIT I
+        JOIN DA.ISPITNIROK IR ON IR.OZNAKAROKA = I.OZNAKAROKA AND IR.SKGODINA = I.SKGODINA
+        WHERE STATUS = 'o' AND OCENA > 5
+        GROUP BY IR.SKGODINA, IR.OZNAKAROKA, IR.NAZIV, OCENA 
+        ORDER BY IR.SKGODINA, IR.OZNAKAROKA, OCENA;
+    checkSQL("DECLARE");
+
+    EXEC SQL DECLARE kursor_polaganja CURSOR FOR
+        SELECT INDEKS, IDPREDMETA, SKGODINA, OZNAKAROKA, DATPOLAGANJA
+        FROM DA.ISPIT
+        WHERE OCENA > 5 AND STATUS = 'o' AND SKGODINA = :godina_roka AND OZNAKAROKA = :oznaka_roka
+        FOR UPDATE;
+    checkSQL("DECLARE");
+
+    EXEC SQL OPEN kursor_rokovi;
+    checkSQL("OPEN rokovi");
+
+    for(;;) {
+        EXEC SQL
+            FETCH kursor_rokovi
+            INTO :godina_roka, :oznaka_roka, :naziv_ir, :ocena, :uspesno;
+        checkSQL("FETCH rokovi");
+
+        if(SQLCODE == 100)
+            break;
+
+        if(ocena == 6)
+            printf("%s\n", naziv_ir);
+
+        printf("\t%7hd %10d\n", ocena, uspesno);
+
+        if(ocena == 10) {
+            printf("Da li zelite da obrisete polaganja? [d/n] ");
+            scanf(" %c", &odg);
+
+            if(odg == 'd') {
+                brojac = 0;
+
+                EXEC SQL OPEN kursor_polaganja;
+                checkSQL("OPEN polaganja");
+
+                printf("Polaganja koja se brisu:\n");
+
+                for(;;) {
+                    EXEC SQL
+                        FETCH kursor_polaganja
+                        INTO :indeks, :idpredmeta, :godina_roka, :oznaka_roka, :datum_polaganja :ind_datum_polaganja;
+                    checkSQL("FETCH polaganja");
+
+                    if(SQLCODE == 100)
+                        break;
+
+                    printf("\t%d %d %hd %s %s\n", indeks, idpredmeta, godina_roka, oznaka_roka, ind_datum_polaganja < 0 ? "-" : datum_polaganja);
+
+                    EXEC SQL
+                        DELETE FROM DA.ISPIT
+                        WHERE CURRENT OF kursor_polaganja;
+                    checkSQL("DELETE");
+
+                    brojac++;
+                }
+
+                printf("Obrisano je %d redova.\n", brojac);
+
+                EXEC SQL CLOSE kursor_polaganja;
+                checkSQL("CLOSE polaganja");
+
+                printf("Nastavi? [d/n] ");
+                scanf(" %c", &odg);   // ako stavimo razmak pre %c ne treba nam getchar() da pokupi novi red !
+
+                if(odg == 'n')
+                    break;
+            }
+        }
+    }
+
+    EXEC SQL CLOSE kursor_rokovi;
+    checkSQL("CLOSE rokovi");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+    
+  }

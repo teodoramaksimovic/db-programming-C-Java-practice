@@ -1,0 +1,138 @@
+/*
+Zadatak 5.9:
+Pronalazi indekse i nazive predmeta za sva neuspesna polaganja.
+Studenti se obradjuju po indeksu rastuce, najvise 10 studenata.
+
+Sva brisanja cine jednu transakciju.
+
+Nakon brisanja podataka jednog studenta korisnik moze da ponisti
+samo izmene za tog studenta, dok izmene prethodnih studenata ostaju.
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+
+sqlint32 indeks;
+char naziv_predmeta[151];
+
+EXEC SQL END DECLARE SECTION;
+
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    /* Najvise 10 studenata koji imaju neuspesna polaganja, sortirano po indeksu rastuce. */
+    EXEC SQL
+        DECLARE studenti CURSOR FOR
+            SELECT DISTINCT INDEKS
+            FROM DA.ISPIT
+            WHERE STATUS = 'o'
+              AND OCENA <= 5
+            ORDER BY INDEKS
+            FETCH FIRST 10 ROWS ONLY;
+    checkSQL("DECLARE studenti");
+
+    EXEC SQL OPEN studenti;
+    checkSQL("OPEN studenti");
+
+    for (;;) {
+        EXEC SQL
+            FETCH studenti
+            INTO :indeks;
+        checkSQL("FETCH studenti");
+
+        if (SQLCODE == 100)
+            break;
+
+        printf("\nStudent: %d\n", indeks);
+
+        EXEC SQL SAVEPOINT student_savepoint ON ROLLBACK RETAIN CURSORS;
+        checkSQL("SAVEPOINT");
+
+        EXEC SQL
+            DECLARE predmeti CURSOR FOR
+                SELECT P.NAZIV
+                FROM DA.ISPIT I
+                JOIN DA.PREDMET P ON P.ID = I.IDPREDMETA
+                WHERE I.INDEKS = :indeks AND I.STATUS = 'o' AND I.OCENA <= 5;
+        checkSQL("DECLARE predmeti");
+
+        EXEC SQL OPEN predmeti;
+        checkSQL("OPEN predmeti");
+
+        printf("Neuspesna polaganja:\n");
+        for (;;) {
+            EXEC SQL
+                FETCH predmeti
+                INTO :naziv_predmeta;
+            checkSQL("FETCH predmeti");
+
+            if (SQLCODE == 100)
+                break;
+            printf("\t%s\n", naziv_predmeta);
+        }
+
+        EXEC SQL CLOSE predmeti;
+        checkSQL("CLOSE predmeti");
+
+        /* Brisemo sva neuspesna polaganja trenutnog studenta.   */
+        EXEC SQL
+            DELETE FROM DA.ISPIT
+            WHERE INDEKS = :indeks AND STATUS = 'o' AND OCENA <= 5;
+        checkSQL("DELETE");
+
+        printf("Polaganja studenta %d su obrisana.\n", indeks);
+
+        printf("Da li zelite da ponistite brisanje za ovog studenta? [d/n] ");
+
+        char odgovor;
+        scanf(" %c", &odgovor);
+
+        if (odgovor == 'd' || odgovor == 'D') {
+            EXEC SQL ROLLBACK TO SAVEPOINT student_savepoint;
+            checkSQL("ROLLBACK TO SAVEPOINT");
+            printf("Brisanja za studenta %d su ponistena.\n", indeks);
+        }
+        else printf("Brisanja za studenta %d ostaju sacuvana.\n", indeks);
+    }
+
+
+    EXEC SQL CLOSE studenti;
+    checkSQL("CLOSE studenti");
+
+    EXEC SQL COMMIT;
+    checkSQL("COMMIT");
+
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

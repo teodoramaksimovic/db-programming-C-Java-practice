@@ -1,0 +1,11 @@
+SELECT D.INDEKS, D.IME, D.PREZIME
+FROM DA.DOSIJE D
+WHERE NOT EXISTS (
+    SELECT *
+    FROM DA.ISPIT I
+    WHERE I.INDEKS = D.INDEKS
+      AND I.STATUS = 'o'
+      AND I.OCENA > 5
+);
+
+-- studenti bez polozenih ispita

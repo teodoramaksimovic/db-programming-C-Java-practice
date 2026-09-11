@@ -1,0 +1,54 @@
+/*
+Zadatak 2.10: Napisati C/SQL program kojim se svim obaveznim predmetima na studijskom programu 'Informatika' povećava broj bodova za 2.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+
+    EXEC SQL 
+        UPDATE DA.PREDMET
+        SET ESPB=ESPB+2
+        WHERE ID IN (
+            SELECT IDPREDMETA
+            FROM DA.PREDMETPROGRAMA PP JOIN DA.STUDIJSKIPROGRAM SP ON SP.ID=PP.IDPROGRAMA
+            WHERE SP.NAZIV = 'Informatika' AND PP.VRSTA='obavezan'
+        );
+    checkSQL("UPDATE");
+    printf("Povecano!\n");
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

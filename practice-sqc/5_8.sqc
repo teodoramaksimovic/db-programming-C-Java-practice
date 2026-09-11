@@ -1,0 +1,61 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("CONNECT");
+
+    EXEC SQL
+        INSERT INTO DA.ISPITNIROK (SKGODINA, OZNAKAROKA, NAZIV, DATPOCETKAPRIJAVE, DATKRAJAPRIJAVE)
+        VALUES (2020, 'apr', 'April 2021', CURRENT DATE, CURRENT DATE + 15 DAYS);
+    checkSQL("INSERT");
+
+    EXEC SQL COMMIT;
+    checkSQL("COMMIT 1");
+
+    printf("Ispitni rok je uspesno dodat.\n");
+
+    EXEC SQL
+        UPDATE DA.ISPITNIROK
+        SET DATKRAJAPRIJAVE = DATKRAJAPRIJAVE - 5 DAYS
+        WHERE SKGODINA = 2020
+          AND OZNAKAROKA = 'apr';
+
+    checkSQL("UPDATE");
+
+    EXEC SQL COMMIT;
+    checkSQL("COMMIT 2");
+
+    printf("Datum kraja prijavljivanja je uspesno promenjen.\n");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

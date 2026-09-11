@@ -1,0 +1,124 @@
+/*
+Zadatak 3.13: Napisati C/SQL program kojim se omogućava nastavniku da unese naziv predmeta, godinu roka i oznaku roka. 
+
+Za svako polaganje datog predmeta u datom ispitnom roku ponuditi nastavniku mogućnost da izmeni ocenu koju je student osvojio. 
+
+Ispisati informacije o indeksu, imenu i prezimenu studenta kao i ocenu koju je dobio, pa zatražiti od nastavnika novu ocenu. 
+
+Nakon unosa nove ocene, obavestiti nastavnika o uspešnosti izmene i preći na naredno polaganje (ukoliko ih ima više).
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv_predmeta[151], oznaka_roka[21], ime[51], prezime[51];
+short skgodina;
+sqlint32 indeks;
+short ocena;
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+    
+    // naziv p godina roka oznaka roka
+    printf("Unesi naziv predmeta: ");
+    fgets(naziv_predmeta, sizeof(naziv_predmeta), stdin);
+    naziv_predmeta[strcspn(naziv_predmeta, "\n")] = '\0';
+
+    printf("Unesi godinu roka: ");
+    scanf("%hd", &skgodina);
+    getchar();
+
+    printf("Unesi oznaku roka: ");
+    fgets(oznaka_roka, sizeof(oznaka_roka), stdin);
+    oznaka_roka[strcspn(oznaka_roka, "\n")] = '\0';
+
+    EXEC SQL 
+        DECLARE polaganja CURSOR WITH HOLD FOR 
+            SELECT  I.INDEKS,
+                    (SELECT IME FROM DA.DOSIJE D WHERE D.INDEKS=I.INDEKS),
+                    (SELECT PREZIME FROM DA.DOSIJE D WHERE D.INDEKS=I.INDEKS),
+                    I.OCENA 
+            FROM    DA.ISPIT I
+            WHERE STATUS='o' AND SKGODINA=:skgodina AND OZNAKAROKA=:oznaka_roka AND 
+                    :naziv_predmeta = (
+                        SELECT NAZIV
+                        FROM DA.PREDMET P 
+                        WHERE P.ID=I.IDPREDMETA)
+            FOR UPDATE OF OCENA;
+    checkSQL("DECLARE");
+    
+    EXEC SQL OPEN polaganja;
+    checkSQL("OPEN");
+
+    for(;;){
+        EXEC SQL 
+            FETCH polaganja
+            INTO :indeks, :ime, :prezime, :ocena;
+        checkSQL("FETCH");
+
+        if(SQLCODE==100)
+            break;
+        
+        printf("%d %s %s %hd\n", indeks, ime, prezime, ocena);
+        printf("\tDa li zelite da promenite ocenu? [d/n] ");
+
+        char odg;
+        scanf("%c", &odg);
+        getchar();
+
+        if(odg == 'd' || odg == 'D'){
+                printf("\tUnesite novu ocenu: ");
+                scanf("%hd", &ocena);
+                getchar();
+
+                EXEC SQL 
+                    UPDATE DA.ISPIT
+                    SET OCENA = :ocena
+                    WHERE CURRENT OF polaganja;
+                checkSQL("UPDATE");
+
+                EXEC SQL COMMIT;
+                checkSQL("COMMIT");
+
+                printf("\tOcena uspesno izmenjena!\n");
+
+        }
+    }
+
+    EXEC SQL CLOSE polaganja;
+    checkSQL("CLOSE");
+
+    EXEC SQL COMMIT;
+    checkSQL("COMMIT 2");
+
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}

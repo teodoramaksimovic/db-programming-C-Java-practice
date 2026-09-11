@@ -1,0 +1,57 @@
+/*
+Zadatak 2.11: Napisati C/SQL program kojim se, za sve položene ispite čiji se naziv predmeta unosi sa standardnog ulaza, ocena uvećava za 1.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+char db_name[20];
+char db_user[20];
+char db_pass[20];
+char naziv[51];
+EXEC SQL END DECLARE SECTION;
+
+void checkSQL(const char *str)
+{
+    if (SQLCODE < 0) {
+        fprintf(stderr, "Greska %d: %s\n", SQLCODE, str);
+
+        EXEC SQL ROLLBACK;
+        EXEC SQL CONNECT RESET;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main()
+{
+    strcpy(db_name, getenv("DB_NAME"));
+    strcpy(db_user, getenv("DB_USER"));
+    strcpy(db_pass, getenv("DB_PASS"));
+    EXEC SQL CONNECT TO :db_name USER :db_user USING :db_pass;
+
+    checkSQL("Konekcija na bazu podataka");
+
+    printf("Unesite naziv predmeta:\n");
+
+    fgets(naziv, sizeof(naziv), stdin);   // MORA FGETS JER MOZE DA IMA RAZMAK U NAZIVU
+    naziv[strcspn(naziv,"\n")] = '\0';     
+
+
+    EXEC SQL 
+        UPDATE DA.ISPIT  
+        SET OCENA=OCENA+1
+        WHERE STATUS='o' AND OCENA BETWEEN 6 AND 9 AND IDPREDMETA IN (
+            SELECT ID FROM DA.PREDMET WHERE NAZIV = :naziv
+        );
+    checkSQL("UPDATE");
+    
+    EXEC SQL CONNECT RESET;
+    checkSQL("RESET");
+
+    return 0;
+}
