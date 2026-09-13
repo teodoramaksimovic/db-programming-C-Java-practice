@@ -1,0 +1,13 @@
+**/hibernate.cfg.xml
+
+**/lib/*.jar
+**/bin/
+**/target/
+**/*.class
+
+**/.classpath
+**/.project
+**/.settings/
+.idea/
+.vscode/
+*.iml
